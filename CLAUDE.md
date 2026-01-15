@@ -6,7 +6,11 @@ This document provides essential context for AI assistants working with the AI-F
 
 **AI-Fundamentals** is an educational repository focused on artificial intelligence concepts, implementations, and learning resources. The repository serves as a comprehensive guide for understanding AI from foundational principles to practical applications.
 
-## Project Structure
+## Current Status
+
+This is a new project. Create directories and files as needed following the planned structure below.
+
+## Planned Project Structure
 
 ```
 AI-Fundamentals/
