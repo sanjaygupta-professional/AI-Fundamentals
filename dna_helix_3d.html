@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D DNA Double Helix</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 20px;
+            border-radius: 10px;
+            color: white;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            margin: 0 0 15px 0;
+            font-size: 24px;
+            color: #00ff88;
+            text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px 0;
+            width: 100%;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        .info {
+            margin-top: 15px;
+            font-size: 12px;
+            color: #aaa;
+            line-height: 1.6;
+        }
+
+        .legend {
+            margin-top: 15px;
+            font-size: 11px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+
+        .color-box {
+            width: 15px;
+            height: 15px;
+            border-radius: 3px;
+            margin-right: 8px;
+            display: inline-block;
+        }
+
+        .adenine { background: #4a90e2; }
+        .thymine { background: #f5d547; }
+        .guanine { background: #e74c3c; }
+        .cytosine { background: #2ecc71; }
+    </style>
+</head>
+<body>
+    <div id="canvas-container"></div>
+
+    <div id="controls">
+        <h1>DNA Double Helix</h1>
+        <button id="unzip-btn">Unzip DNA Strands</button>
+        <button id="reset-btn">Reset View</button>
+
+        <div class="legend">
+            <strong>Base Pairs:</strong>
+            <div class="legend-item">
+                <span class="color-box adenine"></span>
+                <span>Adenine (A)</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box thymine"></span>
+                <span>Thymine (T)</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box guanine"></span>
+                <span>Guanine (G)</span>
+            </div>
+            <div class="legend-item">
+                <span class="color-box cytosine"></span>
+                <span>Cytosine (C)</span>
+            </div>
+        </div>
+
+        <div class="info">
+            <strong>Controls:</strong><br>
+            • Left click + drag to rotate<br>
+            • Right click + drag to pan<br>
+            • Scroll to zoom in/out
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0a0a0a, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1000
+        );
+        camera.position.set(0, 0, 50);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0x0a0a0a, 1);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const pointLight1 = new THREE.PointLight(0x00ff88, 1, 100);
+        pointLight1.position.set(30, 30, 30);
+        scene.add(pointLight1);
+
+        const pointLight2 = new THREE.PointLight(0xff0088, 1, 100);
+        pointLight2.position.set(-30, -30, 30);
+        scene.add(pointLight2);
+
+        const pointLight3 = new THREE.PointLight(0x0088ff, 1, 100);
+        pointLight3.position.set(0, 0, -30);
+        scene.add(pointLight3);
+
+        // DNA Parameters
+        const helixHeight = 40;
+        const helixRadius = 8;
+        const basePairs = 20;
+        const turnsPerHeight = 2;
+
+        // DNA group
+        const dnaGroup = new THREE.Group();
+        scene.add(dnaGroup);
+
+        // Base pair colors
+        const baseColors = {
+            adenine: 0x4a90e2,   // Blue
+            thymine: 0xf5d547,   // Yellow
+            guanine: 0xe74c3c,   // Red
+            cytosine: 0x2ecc71   // Green
+        };
+
+        // Arrays to store DNA components
+        const strand1Bases = [];
+        const strand2Bases = [];
+        const bonds = [];
+        const backboneSegments1 = [];
+        const backboneSegments2 = [];
+
+        // Base pairs sequence (alternating A-T and G-C)
+        const sequence = [];
+        for (let i = 0; i < basePairs; i++) {
+            sequence.push(i % 2 === 0 ? ['adenine', 'thymine'] : ['guanine', 'cytosine']);
+        }
+
+        // Create DNA structure
+        function createDNA() {
+            const sphereGeometry = new THREE.SphereGeometry(0.8, 16, 16);
+
+            for (let i = 0; i < basePairs; i++) {
+                const t = i / basePairs;
+                const y = t * helixHeight - helixHeight / 2;
+                const angle = t * Math.PI * 2 * turnsPerHeight;
+
+                // Strand 1 (outer spiral)
+                const x1 = Math.cos(angle) * helixRadius;
+                const z1 = Math.sin(angle) * helixRadius;
+
+                // Strand 2 (opposite side)
+                const x2 = Math.cos(angle + Math.PI) * helixRadius;
+                const z2 = Math.sin(angle + Math.PI) * helixRadius;
+
+                // Create base pair
+                const [base1Type, base2Type] = sequence[i];
+
+                // Base 1
+                const material1 = new THREE.MeshPhongMaterial({
+                    color: baseColors[base1Type],
+                    emissive: baseColors[base1Type],
+                    emissiveIntensity: 0.2,
+                    shininess: 100
+                });
+                const base1 = new THREE.Mesh(sphereGeometry, material1);
+                base1.position.set(x1, y, z1);
+                base1.userData = { originalPos: { x: x1, y: y, z: z1 }, strand: 1 };
+                dnaGroup.add(base1);
+                strand1Bases.push(base1);
+
+                // Base 2
+                const material2 = new THREE.MeshPhongMaterial({
+                    color: baseColors[base2Type],
+                    emissive: baseColors[base2Type],
+                    emissiveIntensity: 0.2,
+                    shininess: 100
+                });
+                const base2 = new THREE.Mesh(sphereGeometry, material2);
+                base2.position.set(x2, y, z2);
+                base2.userData = { originalPos: { x: x2, y: y, z: z2 }, strand: 2 };
+                dnaGroup.add(base2);
+                strand2Bases.push(base2);
+
+                // Create bond (cylinder connecting bases)
+                createBond(base1.position, base2.position);
+
+                // Create backbone segments
+                if (i < basePairs - 1) {
+                    const nextT = (i + 1) / basePairs;
+                    const nextY = nextT * helixHeight - helixHeight / 2;
+                    const nextAngle = nextT * Math.PI * 2 * turnsPerHeight;
+
+                    const nextX1 = Math.cos(nextAngle) * helixRadius;
+                    const nextZ1 = Math.sin(nextAngle) * helixRadius;
+                    const nextX2 = Math.cos(nextAngle + Math.PI) * helixRadius;
+                    const nextZ2 = Math.sin(nextAngle + Math.PI) * helixRadius;
+
+                    createBackbone(
+                        new THREE.Vector3(x1, y, z1),
+                        new THREE.Vector3(nextX1, nextY, nextZ1),
+                        backboneSegments1,
+                        1
+                    );
+                    createBackbone(
+                        new THREE.Vector3(x2, y, z2),
+                        new THREE.Vector3(nextX2, nextY, nextZ2),
+                        backboneSegments2,
+                        2
+                    );
+                }
+            }
+        }
+
+        // Create cylindrical bond between bases
+        function createBond(pos1, pos2) {
+            const direction = new THREE.Vector3().subVectors(pos2, pos1);
+            const length = direction.length();
+            const midpoint = new THREE.Vector3().addVectors(pos1, pos2).multiplyScalar(0.5);
+
+            const cylinderGeometry = new THREE.CylinderGeometry(0.2, 0.2, length, 8);
+            const cylinderMaterial = new THREE.MeshPhongMaterial({
+                color: 0x888888,
+                transparent: true,
+                opacity: 0.6
+            });
+            const cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+
+            cylinder.position.copy(midpoint);
+            cylinder.quaternion.setFromUnitVectors(
+                new THREE.Vector3(0, 1, 0),
+                direction.normalize()
+            );
+
+            cylinder.userData = { type: 'bond', pos1: pos1.clone(), pos2: pos2.clone() };
+            dnaGroup.add(cylinder);
+            bonds.push(cylinder);
+        }
+
+        // Create glowing backbone
+        function createBackbone(pos1, pos2, segmentsArray, strand) {
+            const curve = new THREE.QuadraticBezierCurve3(
+                pos1,
+                new THREE.Vector3().addVectors(pos1, pos2).multiplyScalar(0.5),
+                pos2
+            );
+
+            const tubeGeometry = new THREE.TubeGeometry(curve, 10, 0.4, 8, false);
+            const tubeMaterial = new THREE.MeshPhongMaterial({
+                color: strand === 1 ? 0x00ccff : 0xff00cc,
+                emissive: strand === 1 ? 0x0088cc : 0xcc0088,
+                emissiveIntensity: 0.4,
+                shininess: 100,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            const tube = new THREE.Mesh(tubeGeometry, tubeMaterial);
+            tube.userData = { type: 'backbone', strand: strand, pos1: pos1.clone(), pos2: pos2.clone() };
+            dnaGroup.add(tube);
+            segmentsArray.push(tube);
+        }
+
+        // Particle system for cellular environment
+        function createParticles() {
+            const particleCount = 1000;
+            const particleGeometry = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const velocities = [];
+
+            for (let i = 0; i < particleCount; i++) {
+                positions[i * 3] = (Math.random() - 0.5) * 100;
+                positions[i * 3 + 1] = (Math.random() - 0.5) * 80;
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 100;
+
+                velocities.push({
+                    x: (Math.random() - 0.5) * 0.02,
+                    y: (Math.random() - 0.5) * 0.02,
+                    z: (Math.random() - 0.5) * 0.02
+                });
+            }
+
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const particleMaterial = new THREE.PointsMaterial({
+                color: 0x00ffaa,
+                size: 0.3,
+                transparent: true,
+                opacity: 0.6,
+                blending: THREE.AdditiveBlending
+            });
+
+            const particles = new THREE.Points(particleGeometry, particleMaterial);
+            particles.userData.velocities = velocities;
+            scene.add(particles);
+
+            return particles;
+        }
+
+        const particles = createParticles();
+
+        // Mouse controls (OrbitControls)
+        class OrbitControls {
+            constructor(camera, domElement) {
+                this.camera = camera;
+                this.domElement = domElement;
+                this.target = new THREE.Vector3();
+
+                this.minDistance = 20;
+                this.maxDistance = 100;
+                this.enabled = true;
+
+                this.rotateSpeed = 1.0;
+                this.zoomSpeed = 1.0;
+                this.panSpeed = 1.0;
+
+                this.state = { NONE: -1, ROTATE: 0, ZOOM: 1, PAN: 2 };
+                this.currentState = this.state.NONE;
+
+                this.rotateStart = new THREE.Vector2();
+                this.rotateEnd = new THREE.Vector2();
+                this.rotateDelta = new THREE.Vector2();
+
+                this.panStart = new THREE.Vector2();
+                this.panEnd = new THREE.Vector2();
+                this.panDelta = new THREE.Vector2();
+
+                this.spherical = new THREE.Spherical();
+                this.sphericalDelta = new THREE.Spherical();
+
+                this.scale = 1;
+                this.panOffset = new THREE.Vector3();
+
+                this.init();
+            }
+
+            init() {
+                this.domElement.addEventListener('mousedown', this.onMouseDown.bind(this), false);
+                this.domElement.addEventListener('wheel', this.onMouseWheel.bind(this), false);
+                this.domElement.addEventListener('contextmenu', (e) => e.preventDefault(), false);
+            }
+
+            onMouseDown(event) {
+                if (!this.enabled) return;
+
+                event.preventDefault();
+
+                if (event.button === 0) {
+                    this.currentState = this.state.ROTATE;
+                    this.rotateStart.set(event.clientX, event.clientY);
+                } else if (event.button === 2) {
+                    this.currentState = this.state.PAN;
+                    this.panStart.set(event.clientX, event.clientY);
+                }
+
+                this.domElement.addEventListener('mousemove', this.onMouseMove.bind(this), false);
+                this.domElement.addEventListener('mouseup', this.onMouseUp.bind(this), false);
+            }
+
+            onMouseMove(event) {
+                if (!this.enabled) return;
+
+                event.preventDefault();
+
+                if (this.currentState === this.state.ROTATE) {
+                    this.rotateEnd.set(event.clientX, event.clientY);
+                    this.rotateDelta.subVectors(this.rotateEnd, this.rotateStart).multiplyScalar(this.rotateSpeed);
+
+                    this.sphericalDelta.theta = 2 * Math.PI * this.rotateDelta.x / this.domElement.clientHeight;
+                    this.sphericalDelta.phi = 2 * Math.PI * this.rotateDelta.y / this.domElement.clientHeight;
+
+                    this.rotateStart.copy(this.rotateEnd);
+                } else if (this.currentState === this.state.PAN) {
+                    this.panEnd.set(event.clientX, event.clientY);
+                    this.panDelta.subVectors(this.panEnd, this.panStart).multiplyScalar(this.panSpeed);
+                    this.pan(this.panDelta.x, this.panDelta.y);
+                    this.panStart.copy(this.panEnd);
+                }
+            }
+
+            onMouseUp() {
+                if (!this.enabled) return;
+
+                this.domElement.removeEventListener('mousemove', this.onMouseMove.bind(this), false);
+                this.domElement.removeEventListener('mouseup', this.onMouseUp.bind(this), false);
+                this.currentState = this.state.NONE;
+            }
+
+            onMouseWheel(event) {
+                if (!this.enabled) return;
+
+                event.preventDefault();
+
+                if (event.deltaY < 0) {
+                    this.scale /= 0.95;
+                } else {
+                    this.scale *= 0.95;
+                }
+            }
+
+            pan(deltaX, deltaY) {
+                const offset = new THREE.Vector3();
+                const panLeft = new THREE.Vector3();
+                const panUp = new THREE.Vector3();
+
+                panLeft.setFromMatrixColumn(this.camera.matrix, 0);
+                panUp.setFromMatrixColumn(this.camera.matrix, 1);
+
+                panLeft.multiplyScalar(-deltaX * 0.01);
+                panUp.multiplyScalar(deltaY * 0.01);
+
+                offset.copy(panLeft).add(panUp);
+                this.panOffset.add(offset);
+            }
+
+            update() {
+                const offset = new THREE.Vector3();
+                offset.copy(this.camera.position).sub(this.target);
+
+                this.spherical.setFromVector3(offset);
+
+                this.spherical.theta -= this.sphericalDelta.theta;
+                this.spherical.phi -= this.sphericalDelta.phi;
+
+                this.spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, this.spherical.phi));
+
+                this.spherical.radius *= this.scale;
+                this.spherical.radius = Math.max(this.minDistance, Math.min(this.maxDistance, this.spherical.radius));
+
+                this.target.add(this.panOffset);
+
+                offset.setFromSpherical(this.spherical);
+                this.camera.position.copy(this.target).add(offset);
+                this.camera.lookAt(this.target);
+
+                this.sphericalDelta.set(0, 0, 0);
+                this.scale = 1;
+                this.panOffset.set(0, 0, 0);
+            }
+        }
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+
+        // Animation state
+        let isUnzipping = false;
+        let unzipProgress = 0;
+        let isZipping = false;
+        const unzipDistance = 15;
+
+        // Unzip animation
+        function animateUnzip(delta) {
+            if (isUnzipping && unzipProgress < 1) {
+                unzipProgress += delta * 0.5;
+                if (unzipProgress >= 1) {
+                    unzipProgress = 1;
+                    isUnzipping = false;
+                }
+            } else if (isZipping && unzipProgress > 0) {
+                unzipProgress -= delta * 0.5;
+                if (unzipProgress <= 0) {
+                    unzipProgress = 0;
+                    isZipping = false;
+                }
+            }
+
+            const easeProgress = easeInOutCubic(unzipProgress);
+
+            // Move bases
+            strand1Bases.forEach((base, i) => {
+                const orig = base.userData.originalPos;
+                const offset = easeProgress * unzipDistance;
+                const angle = (i / basePairs) * Math.PI * 2 * turnsPerHeight;
+                const offsetX = Math.cos(angle) * offset;
+                const offsetZ = Math.sin(angle) * offset;
+                base.position.set(orig.x + offsetX, orig.y, orig.z + offsetZ);
+            });
+
+            strand2Bases.forEach((base, i) => {
+                const orig = base.userData.originalPos;
+                const offset = easeProgress * unzipDistance;
+                const angle = (i / basePairs) * Math.PI * 2 * turnsPerHeight + Math.PI;
+                const offsetX = Math.cos(angle) * offset;
+                const offsetZ = Math.sin(angle) * offset;
+                base.position.set(orig.x + offsetX, orig.y, orig.z + offsetZ);
+            });
+
+            // Update bonds
+            bonds.forEach((bond, i) => {
+                const base1 = strand1Bases[i];
+                const base2 = strand2Bases[i];
+
+                const direction = new THREE.Vector3().subVectors(base2.position, base1.position);
+                const length = direction.length();
+                const midpoint = new THREE.Vector3().addVectors(base1.position, base2.position).multiplyScalar(0.5);
+
+                bond.position.copy(midpoint);
+                bond.scale.y = length / bonds[i].userData.originalLength || length / 16;
+                bond.quaternion.setFromUnitVectors(
+                    new THREE.Vector3(0, 1, 0),
+                    direction.normalize()
+                );
+
+                bond.material.opacity = 0.6 * (1 - easeProgress * 0.8);
+            });
+
+            // Update backbone
+            updateBackbone(backboneSegments1, strand1Bases, easeProgress, 1);
+            updateBackbone(backboneSegments2, strand2Bases, easeProgress, 2);
+        }
+
+        function updateBackbone(segments, bases, progress, strand) {
+            segments.forEach((segment, i) => {
+                const pos1 = bases[i].position;
+                const pos2 = bases[i + 1].position;
+
+                const curve = new THREE.QuadraticBezierCurve3(
+                    pos1,
+                    new THREE.Vector3().addVectors(pos1, pos2).multiplyScalar(0.5),
+                    pos2
+                );
+
+                segment.geometry.dispose();
+                segment.geometry = new THREE.TubeGeometry(curve, 10, 0.4, 8, false);
+            });
+        }
+
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+        }
+
+        // Button handlers
+        document.getElementById('unzip-btn').addEventListener('click', () => {
+            if (!isUnzipping && !isZipping) {
+                if (unzipProgress === 0) {
+                    isUnzipping = true;
+                    document.getElementById('unzip-btn').textContent = 'Zip DNA Strands';
+                } else {
+                    isZipping = true;
+                    document.getElementById('unzip-btn').textContent = 'Unzip DNA Strands';
+                }
+            }
+        });
+
+        document.getElementById('reset-btn').addEventListener('click', () => {
+            camera.position.set(0, 0, 50);
+            controls.target.set(0, 0, 0);
+        });
+
+        // Store original bond length
+        bonds.forEach(bond => {
+            const pos1 = bond.userData.pos1;
+            const pos2 = bond.userData.pos2;
+            bond.userData.originalLength = pos1.distanceTo(pos2);
+        });
+
+        // Create DNA
+        createDNA();
+
+        // Animation loop
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta();
+
+            // Rotate DNA
+            dnaGroup.rotation.y += 0.005;
+
+            // Animate particles
+            const positions = particles.geometry.attributes.position.array;
+            const velocities = particles.userData.velocities;
+
+            for (let i = 0; i < positions.length / 3; i++) {
+                positions[i * 3] += velocities[i].x;
+                positions[i * 3 + 1] += velocities[i].y;
+                positions[i * 3 + 2] += velocities[i].z;
+
+                // Wrap around
+                if (Math.abs(positions[i * 3]) > 50) velocities[i].x *= -1;
+                if (Math.abs(positions[i * 3 + 1]) > 40) velocities[i].y *= -1;
+                if (Math.abs(positions[i * 3 + 2]) > 50) velocities[i].z *= -1;
+            }
+            particles.geometry.attributes.position.needsUpdate = true;
+
+            // Animate lights
+            const time = Date.now() * 0.001;
+            pointLight1.position.x = Math.sin(time * 0.7) * 30;
+            pointLight1.position.z = Math.cos(time * 0.7) * 30;
+
+            pointLight2.position.x = Math.cos(time * 0.5) * 30;
+            pointLight2.position.z = Math.sin(time * 0.5) * 30;
+
+            // Unzip animation
+            animateUnzip(delta);
+
+            // Update controls
+            controls.update();
+
+            renderer.render(scene, camera);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start animation
+        animate();
+    </script>
+</body>
+</html>
