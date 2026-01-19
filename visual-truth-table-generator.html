@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visual Truth Table Generator - Circuit of Truth</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        .circuit-line {
+            transition: stroke 0.3s ease, filter 0.3s ease;
+        }
+        .circuit-node {
+            transition: all 0.3s ease;
+        }
+        .glow-green {
+            filter: drop-shadow(0 0 8px #10b981) drop-shadow(0 0 4px #34d399);
+        }
+        .glow-red {
+            filter: drop-shadow(0 0 8px #ef4444) drop-shadow(0 0 4px #f87171);
+        }
+        .glow-gray {
+            filter: drop-shadow(0 0 4px #6b7280);
+        }
+        @keyframes pulse-flow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        .flow-animation {
+            animation: pulse-flow 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo } = React;
+
+        // Logic Parser and Evaluator
+        class LogicParser {
+            constructor(formula) {
+                this.formula = formula.replace(/\s+/g, '');
+                this.pos = 0;
+            }
+
+            parse() {
+                return this.parseOr();
+            }
+
+            parseOr() {
+                let left = this.parseAnd();
+                while (this.peek() === '|' || this.peek(2) === 'OR') {
+                    this.consume(this.peek() === '|' ? 1 : 2);
+                    const right = this.parseAnd();
+                    left = { type: 'OR', left, right };
+                }
+                return left;
+            }
+
+            parseAnd() {
+                let left = this.parseImplication();
+                while (this.peek() === '&' || this.peek(2) === 'AN') {
+                    this.consume(this.peek() === '&' ? 1 : 3);
+                    const right = this.parseImplication();
+                    left = { type: 'AND', left, right };
+                }
+                return left;
+            }
+
+            parseImplication() {
+                let left = this.parseBiconditional();
+                while (this.peek(2) === '->' || this.peek(2) === '=>') {
+                    this.consume(2);
+                    const right = this.parseBiconditional();
+                    left = { type: 'IMPLIES', left, right };
+                }
+                return left;
+            }
+
+            parseBiconditional() {
+                let left = this.parseNot();
+                while (this.peek(3) === '<->' || this.peek(3) === '<=>') {
+                    this.consume(3);
+                    const right = this.parseNot();
+                    left = { type: 'IFF', left, right };
+                }
+                return left;
+            }
+
+            parseNot() {
+                if (this.peek() === '~' || this.peek() === '!' || this.peek(3) === 'NOT') {
+                    this.consume(this.peek() === '~' || this.peek() === '!' ? 1 : 3);
+                    return { type: 'NOT', operand: this.parseNot() };
+                }
+                return this.parsePrimary();
+            }
+
+            parsePrimary() {
+                if (this.peek() === '(') {
+                    this.consume(1);
+                    const expr = this.parseOr();
+                    if (this.peek() === ')') this.consume(1);
+                    return expr;
+                }
+
+                // Variable (single uppercase letter or word)
+                let varName = '';
+                while (this.pos < this.formula.length && /[A-Z]/i.test(this.formula[this.pos])) {
+                    varName += this.formula[this.pos];
+                    this.pos++;
+                }
+
+                if (varName) {
+                    return { type: 'VAR', name: varName.toUpperCase() };
+                }
+
+                throw new Error(`Unexpected character at position ${this.pos}`);
+            }
+
+            peek(len = 1) {
+                return this.formula.substr(this.pos, len);
+            }
+
+            consume(len) {
+                this.pos += len;
+            }
+        }
+
+        function evaluateAST(ast, values) {
+            if (!ast) return false;
+
+            switch (ast.type) {
+                case 'VAR':
+                    return values[ast.name] || false;
+                case 'NOT':
+                    return !evaluateAST(ast.operand, values);
+                case 'AND':
+                    return evaluateAST(ast.left, values) && evaluateAST(ast.right, values);
+                case 'OR':
+                    return evaluateAST(ast.left, values) || evaluateAST(ast.right, values);
+                case 'IMPLIES':
+                    return !evaluateAST(ast.left, values) || evaluateAST(ast.right, values);
+                case 'IFF':
+                    return evaluateAST(ast.left, values) === evaluateAST(ast.right, values);
+                default:
+                    return false;
+            }
+        }
+
+        function extractVariables(ast) {
+            if (!ast) return new Set();
+
+            if (ast.type === 'VAR') {
+                return new Set([ast.name]);
+            }
+
+            const vars = new Set();
+            if (ast.left) extractVariables(ast.left).forEach(v => vars.add(v));
+            if (ast.right) extractVariables(ast.right).forEach(v => vars.add(v));
+            if (ast.operand) extractVariables(ast.operand).forEach(v => vars.add(v));
+
+            return vars;
+        }
+
+        // Visual Circuit Component
+        function CircuitNode({ ast, values, x, y, onLayout }) {
+            useEffect(() => {
+                if (onLayout) {
+                    onLayout({ x, y, width: 120, height: 60 });
+                }
+            }, [x, y, onLayout]);
+
+            if (!ast) return null;
+
+            const result = evaluateAST(ast, values);
+            const color = result ? '#10b981' : '#ef4444';
+            const glowClass = result ? 'glow-green' : 'glow-red';
+
+            if (ast.type === 'VAR') {
+                return (
+                    <g transform={`translate(${x},${y})`}>
+                        <circle
+                            cx="30"
+                            cy="30"
+                            r="25"
+                            fill={color}
+                            className={`circuit-node ${glowClass}`}
+                            stroke="#fff"
+                            strokeWidth="2"
+                        />
+                        <text
+                            x="30"
+                            y="35"
+                            textAnchor="middle"
+                            fill="white"
+                            fontSize="18"
+                            fontWeight="bold"
+                        >
+                            {ast.name}
+                        </text>
+                    </g>
+                );
+            }
+
+            const symbolMap = {
+                'NOT': '¬',
+                'AND': '∧',
+                'OR': '∨',
+                'IMPLIES': '→',
+                'IFF': '↔'
+            };
+
+            return (
+                <g transform={`translate(${x},${y})`}>
+                    <rect
+                        x="0"
+                        y="0"
+                        width="80"
+                        height="60"
+                        rx="8"
+                        fill={color}
+                        className={`circuit-node ${glowClass}`}
+                        stroke="#fff"
+                        strokeWidth="2"
+                    />
+                    <text
+                        x="40"
+                        y="38"
+                        textAnchor="middle"
+                        fill="white"
+                        fontSize="24"
+                        fontWeight="bold"
+                    >
+                        {symbolMap[ast.type] || ast.type}
+                    </text>
+                </g>
+            );
+        }
+
+        function CircuitDiagram({ ast, values }) {
+            const layout = useMemo(() => {
+                if (!ast) return { nodes: [], connections: [] };
+
+                const nodes = [];
+                const connections = [];
+                let nodeId = 0;
+
+                function layoutTree(node, depth, offset) {
+                    if (!node) return null;
+
+                    const id = nodeId++;
+                    const x = offset * 150;
+                    const y = depth * 120 + 50;
+
+                    const result = evaluateAST(node, values);
+
+                    nodes.push({
+                        id,
+                        ast: node,
+                        x,
+                        y,
+                        result
+                    });
+
+                    if (node.type === 'NOT') {
+                        const childId = layoutTree(node.operand, depth + 1, offset);
+                        if (childId !== null) {
+                            connections.push({
+                                from: childId,
+                                to: id,
+                                active: result
+                            });
+                        }
+                    } else if (node.left || node.right) {
+                        const leftOffset = offset - 0.5;
+                        const rightOffset = offset + 0.5;
+
+                        if (node.left) {
+                            const leftId = layoutTree(node.left, depth + 1, leftOffset);
+                            if (leftId !== null) {
+                                connections.push({
+                                    from: leftId,
+                                    to: id,
+                                    active: evaluateAST(node.left, values)
+                                });
+                            }
+                        }
+
+                        if (node.right) {
+                            const rightId = layoutTree(node.right, depth + 1, rightOffset);
+                            if (rightId !== null) {
+                                connections.push({
+                                    from: rightId,
+                                    to: id,
+                                    active: evaluateAST(node.right, values)
+                                });
+                            }
+                        }
+                    }
+
+                    return id;
+                }
+
+                layoutTree(ast, 0, 2);
+
+                return { nodes, connections };
+            }, [ast, values]);
+
+            if (!ast) return null;
+
+            const { nodes, connections } = layout;
+
+            // Calculate viewBox
+            const minX = Math.min(...nodes.map(n => n.x)) - 50;
+            const maxX = Math.max(...nodes.map(n => n.x)) + 150;
+            const minY = 0;
+            const maxY = Math.max(...nodes.map(n => n.y)) + 100;
+
+            return (
+                <svg
+                    width="100%"
+                    height="500"
+                    viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}
+                    className="mx-auto"
+                >
+                    {/* Draw connections first (behind nodes) */}
+                    {connections.map((conn, idx) => {
+                        const fromNode = nodes.find(n => n.id === conn.from);
+                        const toNode = nodes.find(n => n.id === conn.to);
+
+                        if (!fromNode || !toNode) return null;
+
+                        const fromX = fromNode.x + (fromNode.ast.type === 'VAR' ? 30 : 40);
+                        const fromY = fromNode.y + (fromNode.ast.type === 'VAR' ? 60 : 60);
+                        const toX = toNode.x + (toNode.ast.type === 'VAR' ? 30 : 40);
+                        const toY = toNode.y;
+
+                        const color = conn.active ? '#10b981' : '#ef4444';
+                        const glowClass = conn.active ? 'glow-green' : 'glow-red';
+
+                        return (
+                            <g key={idx}>
+                                <line
+                                    x1={fromX}
+                                    y1={fromY}
+                                    x2={toX}
+                                    y2={toY}
+                                    stroke={color}
+                                    strokeWidth="4"
+                                    className={`circuit-line flow-animation ${glowClass}`}
+                                    strokeLinecap="round"
+                                />
+                                <circle
+                                    cx={toX}
+                                    cy={toY}
+                                    r="6"
+                                    fill={color}
+                                    className={glowClass}
+                                />
+                            </g>
+                        );
+                    })}
+
+                    {/* Draw nodes */}
+                    {nodes.map(node => (
+                        <CircuitNode
+                            key={node.id}
+                            ast={node.ast}
+                            values={values}
+                            x={node.x}
+                            y={node.y}
+                        />
+                    ))}
+                </svg>
+            );
+        }
+
+        // Main App Component
+        function App() {
+            const [formula, setFormula] = useState('(P -> Q) & ~Q');
+            const [values, setValues] = useState({});
+            const [ast, setAst] = useState(null);
+            const [error, setError] = useState(null);
+            const [variables, setVariables] = useState([]);
+
+            useEffect(() => {
+                try {
+                    const parser = new LogicParser(formula);
+                    const parsed = parser.parse();
+                    setAst(parsed);
+                    setError(null);
+
+                    const vars = Array.from(extractVariables(parsed)).sort();
+                    setVariables(vars);
+
+                    // Initialize values for new variables
+                    const newValues = { ...values };
+                    vars.forEach(v => {
+                        if (!(v in newValues)) {
+                            newValues[v] = false;
+                        }
+                    });
+                    setValues(newValues);
+                } catch (e) {
+                    setError(e.message);
+                    setAst(null);
+                }
+            }, [formula]);
+
+            const toggleVariable = (varName) => {
+                setValues(prev => ({
+                    ...prev,
+                    [varName]: !prev[varName]
+                }));
+            };
+
+            const finalResult = ast ? evaluateAST(ast, values) : false;
+
+            return (
+                <div className="max-w-7xl mx-auto">
+                    {/* Header */}
+                    <div className="text-center mb-8">
+                        <h1 className="text-5xl font-bold text-white mb-2">
+                            Circuit of Truth
+                        </h1>
+                        <p className="text-gray-400 text-lg">
+                            Visual Truth Table Generator for Philosophical Logic
+                        </p>
+                    </div>
+
+                    {/* Input Section */}
+                    <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 mb-6 border border-gray-700">
+                        <label className="block text-gray-300 font-semibold mb-3 text-sm uppercase tracking-wide">
+                            Logical Formula
+                        </label>
+                        <input
+                            type="text"
+                            value={formula}
+                            onChange={(e) => setFormula(e.target.value)}
+                            className="w-full bg-gray-900 text-white px-6 py-4 rounded-xl text-lg font-mono border-2 border-gray-700 focus:border-blue-500 focus:outline-none transition"
+                            placeholder="e.g., (P -> Q) & ~Q"
+                        />
+                        <div className="mt-3 text-sm text-gray-400">
+                            <span className="font-semibold">Operators:</span> & (AND), | (OR), ~ (NOT), -&gt; (IMPLIES), &lt;-&gt; (IFF)
+                        </div>
+                        {error && (
+                            <div className="mt-3 text-red-400 bg-red-900/20 px-4 py-2 rounded-lg border border-red-800">
+                                Error: {error}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Variable Toggles */}
+                    {variables.length > 0 && (
+                        <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 mb-6 border border-gray-700">
+                            <label className="block text-gray-300 font-semibold mb-4 text-sm uppercase tracking-wide">
+                                Input Variables
+                            </label>
+                            <div className="flex flex-wrap gap-4">
+                                {variables.map(varName => (
+                                    <button
+                                        key={varName}
+                                        onClick={() => toggleVariable(varName)}
+                                        className={`
+                                            px-8 py-4 rounded-xl font-bold text-xl transition-all duration-300
+                                            ${values[varName]
+                                                ? 'bg-green-500 text-white shadow-lg shadow-green-500/50 hover:bg-green-600'
+                                                : 'bg-red-500 text-white shadow-lg shadow-red-500/50 hover:bg-red-600'
+                                            }
+                                        `}
+                                    >
+                                        {varName}: {values[varName] ? 'TRUE' : 'FALSE'}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Circuit Visualization */}
+                    {ast && (
+                        <div className="bg-gray-800/50 backdrop-blur-sm rounded-2xl p-8 border border-gray-700">
+                            <div className="flex items-center justify-between mb-6">
+                                <label className="text-gray-300 font-semibold text-sm uppercase tracking-wide">
+                                    Circuit Visualization
+                                </label>
+                                <div className={`
+                                    px-6 py-2 rounded-full font-bold text-lg
+                                    ${finalResult
+                                        ? 'bg-green-500 text-white shadow-lg shadow-green-500/50'
+                                        : 'bg-red-500 text-white shadow-lg shadow-red-500/50'
+                                    }
+                                `}>
+                                    Result: {finalResult ? 'TRUE' : 'FALSE'}
+                                </div>
+                            </div>
+                            <CircuitDiagram ast={ast} values={values} />
+                        </div>
+                    )}
+
+                    {/* Legend */}
+                    <div className="mt-6 bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700">
+                        <div className="flex items-center justify-center gap-8 text-sm">
+                            <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-green-500 shadow-lg shadow-green-500/50"></div>
+                                <span className="text-gray-300">TRUE</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-red-500 shadow-lg shadow-red-500/50"></div>
+                                <span className="text-gray-300">FALSE</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Examples */}
+                    <div className="mt-6 bg-gray-800/50 backdrop-blur-sm rounded-2xl p-6 border border-gray-700">
+                        <label className="block text-gray-300 font-semibold mb-3 text-sm uppercase tracking-wide">
+                            Example Formulas
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {[
+                                '(P -> Q) & ~Q',
+                                'P & Q',
+                                'P | Q',
+                                '~P',
+                                'P -> Q',
+                                'P <-> Q',
+                                '(P | Q) & (~P | R)',
+                                '(P -> Q) & (Q -> R)'
+                            ].map(example => (
+                                <button
+                                    key={example}
+                                    onClick={() => setFormula(example)}
+                                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-lg text-sm font-mono transition"
+                                >
+                                    {example}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render App
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
